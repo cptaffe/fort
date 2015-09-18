@@ -2,7 +2,7 @@
 /*
 *
 * fort
-* A FORTRAN interpreter.
+* A FORTRAN 66 interpreter.
 *
 * Copyright (c) 2015 Connor Taffe <cpaynetaffe@gmail.com>
 * Licensed under the MIT license <https://opensource.org/licenses/MIT>

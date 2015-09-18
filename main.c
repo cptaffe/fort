@@ -41,7 +41,8 @@ typedef struct {
 
 enum {
 	LEXICAL_TOKEN_ERROR,
-	LEXICAL_TOKEN_COMMENT
+	LEXICAL_TOKEN_COMMENT,
+	LEXICAL_TOKEN_END
 };
 
 struct LexicalToken {
@@ -101,7 +102,15 @@ void *stateCommentLine(Lexer *l) {
 		struct LexicalToken t = lexerEmit(l);
 		t.type = LEXICAL_TOKEN_ERROR;
 		free(t.str);
-		t.str = "error: comment line exceeded maximum line length (72).";
+		t.str = "error: comment line exceeds maximum line length (72).";
+		lexicalTokenPprint(&t);
+		return NULL;
+	} else if (c == EOF) {
+		// Program terminated on non end line, error.
+		struct LexicalToken t = lexerEmit(l);
+		t.type = LEXICAL_TOKEN_ERROR;
+		free(t.str);
+		t.str = "error: comment line terminated program, expected end line.";
 		lexicalTokenPprint(&t);
 		return NULL;
 	}
@@ -113,6 +122,53 @@ void *stateCommentLine(Lexer *l) {
 	return stateStart;
 }
 
+void *stateEndLine(Lexer *l) {
+	int c;
+	// Must be on the 0th column, must be a blank.
+	assert(l->col == 0);
+	assert(lexerNext(l) == ' ');
+
+	// First five columns must be blanks.
+	while ((c = lexerNext(l)) == ' ' && l->col < 6) {}
+	if (l->col != 6) {
+		struct LexicalToken t = lexerEmit(l);
+		t.type = LEXICAL_TOKEN_ERROR;
+		free(t.str);
+		t.str = "error: end line, first five columns must be blank.";
+		lexicalTokenPprint(&t);
+		return NULL;
+	}
+
+	char *msg = "END";
+	while ((c = lexerNext(l)) != '\n' && *msg && l->col < 72) {
+		if (c == *msg) {
+			msg++;
+		} else if (c != ' ') {
+			// unexpected character in end line
+			struct LexicalToken t = lexerEmit(l);
+			t.type = LEXICAL_TOKEN_ERROR;
+			free(t.str);
+			asprintf(&t.str, "error: unexpected character in end line, expected '%c'.", *msg);
+			lexicalTokenPprint(&t);
+			free(t.str);
+			return NULL;
+		}
+	}
+	if (l->col == 72) {
+		struct LexicalToken t = lexerEmit(l);
+		t.type = LEXICAL_TOKEN_ERROR;
+		free(t.str);
+		t.str = "error: end line exceeds maximum line length (72).";
+		lexicalTokenPprint(&t);
+		return NULL;
+	}
+	struct LexicalToken t = lexerEmit(l);
+	t.type = LEXICAL_TOKEN_END;
+	lexicalTokenPprint(&t);
+	free(t.str);
+	return NULL;
+}
+
 void *stateStart(Lexer *l) {
 	int c;
 	assert(l->col == 0); // Must be on 0th column
@@ -120,6 +176,26 @@ void *stateStart(Lexer *l) {
 	if (c == 'C') {
 		// Beginning of comment line.
 		return (void*) stateCommentLine;
+	} else if (c == ' ') {
+		// Blank character, possible end line.
+		return (void *) stateEndLine;
+	} else if (c == EOF) {
+		// Program terminated on non end line, error.
+		struct LexicalToken t = lexerEmit(l);
+		t.type = LEXICAL_TOKEN_ERROR;
+		free(t.str);
+		t.str = "error: empty line terminated program, expected end line.";
+		lexicalTokenPprint(&t);
+		return NULL;
+	} else {
+		// Program terminated on non end line, error.
+		struct LexicalToken t = lexerEmit(l);
+		t.type = LEXICAL_TOKEN_ERROR;
+		free(t.str);
+		asprintf(&t.str, "error: unexpected character '%c' in column 1.", c);
+		lexicalTokenPprint(&t);
+		free(t.str);
+		return NULL;
 	}
 	return NULL;
 }

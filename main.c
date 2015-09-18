@@ -1,19 +1,21 @@
 
 /*
-*
-* fort
-* A FORTRAN 66 interpreter.
-*
-* Copyright (c) 2015 Connor Taffe <cpaynetaffe@gmail.com>
-* Licensed under the MIT license <https://opensource.org/licenses/MIT>
-*
-*/
+ *
+ * fort
+ * A FORTRAN 66 interpreter.
+ *
+ * Copyright (c) 2015 Connor Taffe <cpaynetaffe@gmail.com>
+ * Licensed under the MIT license <https://opensource.org/licenses/MIT>
+ *
+ */
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
 #include <assert.h>
+
+#include "hash.c"
 
 // Secion 3, Program Form
 // Categories dealing with characters:
@@ -30,93 +32,108 @@ char *chars[] = {
 	[CHAR_SPECIAL] = " =+-*/(),.$"
 };
 
-struct HashTableEntry {
-	char *key;
-	void *value;
+typedef struct {
+	FILE *input;
+	char *buf;
+	int i, sz;
+	int col, line;
+} Lexer;
+
+enum {
+	LEXICAL_TOKEN_ERROR
 };
 
-typedef struct {
-	struct HashTableEntry *buckets;
-	int nbuckets;
-} HashTable;
+struct LexicalToken {
+	int type;
+	char *str;
+	int col, line;
+};
 
-uint64_t hash(char *key) {
-	// FNV-1a algorithm
-	uint64_t hash = 14695981039346656037u;
-	assert(key != NULL);
-	while (*key) {
-		hash ^= *key;
-		hash *= 1099511628211u;
-		key++;
+int lexerNext(Lexer *l) {
+	if (l->i == l->sz) {
+		l->sz = (l->sz+1) * 2;
+		l->buf = realloc(l->buf, l->sz);
 	}
-	return hash;
+	l->buf[l->i] = fgetc(l->input);
+	if (l->buf[l->i] == '\n') {
+		l->line++;
+		l->col = 0;
+	} else {
+		l->col++;
+	}
+	return l->buf[l->i++];
 }
 
-void putHashTable(HashTable *h, struct HashTableEntry e) {
-	uint64_t j, i = hash(e.key) % h->nbuckets;
-	j = i;
-	while (h->buckets[i].key != NULL) {
-		i = (i + 1) % h->nbuckets;
-		if (j == i) {
-			// Have looked over entire table
-			// Expand table and rehash appropriately.
-			h->nbuckets *= 2;
-			struct HashTableEntry *en = h->buckets;
-			h->buckets = calloc(sizeof(struct HashTableEntry), h->nbuckets);
-			// Rehash every entry
-			for (uint64_t i = 0; i < h->nbuckets/2; i++) {
-				if (en[i].key != NULL) {
-					putHashTable(h, en[i]);
-				}
-			}
-			free(en);
-			// Defer putting to new invocation of putHashTable
-			return putHashTable(h, e);
-		}
-	}
-	h->buckets[i] = e;
+int lexerPeek(Lexer *l) {
+	int c = fgetc(l->input);
+	ungetc(c, l->input);
+	return c;
 }
 
-struct HashTableEntry fetchHashTable(HashTable *h, char *key) {
-	uint64_t j, i = hash(key) % h->nbuckets;
-	j = i;
-	while (strcmp(h->buckets[j].key, key) != 0) {
-		i = (i + 1) % h->nbuckets;
-		if (j == i) {
-			// Have looked over entire table
-			return (struct HashTableEntry) {};
-		}
+struct LexicalToken lexerEmit(Lexer *l) {
+	struct LexicalToken t = {
+		.str = l->buf,
+		.col = l->col,
+		.line = l->line
+	};
+	l->i = 0;
+	l->sz = 5;
+	l->buf = calloc(sizeof(char), l->sz);
+	return t;
+}
+
+void lexicalTokenPprint(struct LexicalToken *tok) {
+	printf("%d:%d '%s'\n", tok->line+1, tok->col+1, tok->str);
+}
+
+void *stateStart(Lexer *l);
+
+void *stateCommentLine(Lexer *l) {
+	// Must be on 0th column, must be comment line.
+	assert(l->col == 0);
+	assert(lexerNext(l) == 'C');
+
+	while(lexerNext(l) != '\n' && l->col < 72) {}
+	if (l->col == 72) {
+		// Exceeds maximum line length (72), error.
+		struct LexicalToken t = lexerEmit(l);
+		t.type = LEXICAL_TOKEN_ERROR;
+		free(t.str);
+		t.str = "error: comment line exceeded maximum line length (72).";
+		lexicalTokenPprint(&t);
+		return NULL;
 	}
-	return h->buckets[i];
+	// Emit comment line.
+	return stateStart;
+}
+
+void *stateStart(Lexer *l) {
+	int c;
+	assert(l->col == 0); // Must be on 0th column
+	c = lexerPeek(l);
+	if (c == 'C') {
+		// Beginning of comment line.
+		return (void*) stateCommentLine;
+	}
+	return NULL;
 }
 
 int main() {
+	HashTable h;
+	Lexer l;
+	void *func = stateStart;
 	enum { hashTableSize = 2 };
-	HashTable h = {
+	h = (HashTable) {
 		.buckets = calloc(sizeof(struct HashTableEntry), hashTableSize),
 		.nbuckets = hashTableSize
 	};
+	l = (Lexer) {
+		.input = stdin
+	};
 
-	for (;;) {
-		char *key = calloc(sizeof(char), 100), *val = calloc(sizeof(char), 100);
-		int nitem = scanf("%s%s", key, val);
-		if (nitem != 2) {
-			free(key);
-			free(val);
-			break;
-		}
-		putHashTable(&h, (struct HashTableEntry){
-			.key = key,
-			.value = (void *) val
-		});
+	while (func != NULL) {
+		func = ((void*(*)(Lexer*)) func)(&l);
 	}
-
-	for (int i = 0; i < h.nbuckets; i++) {
-		if (h.buckets[i].key) {
-			printf("%d: %s, %s\n", i, h.buckets[i].key, (char *) h.buckets[i].value);
-			free(h.buckets[i].key);
-			free(h.buckets[i].value);
-		}
-	}
+	free(l.buf);
 	free(h.buckets);
 }

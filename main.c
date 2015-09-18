@@ -40,7 +40,8 @@ typedef struct {
 } Lexer;
 
 enum {
-	LEXICAL_TOKEN_ERROR
+	LEXICAL_TOKEN_ERROR,
+	LEXICAL_TOKEN_COMMENT
 };
 
 struct LexicalToken {
@@ -89,11 +90,12 @@ void lexicalTokenPprint(struct LexicalToken *tok) {
 void *stateStart(Lexer *l);
 
 void *stateCommentLine(Lexer *l) {
+	int c;
 	// Must be on 0th column, must be comment line.
 	assert(l->col == 0);
 	assert(lexerNext(l) == 'C');
 
-	while(lexerNext(l) != '\n' && l->col < 72) {}
+	while((c = lexerNext(l)) != EOF && c != '\n' && l->col < 72) {}
 	if (l->col == 72) {
 		// Exceeds maximum line length (72), error.
 		struct LexicalToken t = lexerEmit(l);
@@ -104,6 +106,10 @@ void *stateCommentLine(Lexer *l) {
 		return NULL;
 	}
 	// Emit comment line.
+	struct LexicalToken *t = calloc(sizeof(struct LexicalToken), 1);
+	*t = lexerEmit(l);
+	lexicalTokenPprint(t);
+	free(t);
 	return stateStart;
 }
 

@@ -278,6 +278,32 @@ void *stateCommentLine(Lexer *l) {
 	}
 }
 
+/*
+ * GOTO statement (Section 7.1.2.1)
+ * Unconditional, Assigned, and Computed.
+ */
+void *stateGoto(Lexer *l) {
+	int c;
+	while ((c = lexerNext(l)) != EOF
+		&& c != '\n'
+		&& l->col < MAX_LINE_LENGTH) {
+		if (charDigit(c)) {
+			// Beginning of Unconditional (Section 7.1.2.1.1) or
+			// Assigned (Section 7.1.2.1.2)
+			// Scan Label
+			return NULL;
+		} else if (c == '(') {
+			// Beginning of Computed (Section 7.1.2.1.3)
+			return NULL;
+		}
+	}
+	if (c == EOF) {
+		errorEarlyProgramTermination(l, "GOTO Statement");
+		return NULL;
+	}
+	return NULL;
+}
+
 void *stateLine(Lexer *l);
 
 /*
@@ -316,7 +342,20 @@ void *stateIdent(Lexer *l) {
 		for (int i = _KEYWORD_BEGIN+1; i < _KEYWORD_END; i++) {
 			if (strcmp(ident, keywords[i]) == 0) {
 				lexerEmit(l, LEXICAL_TOKEN_KEYWORD);
-				return NULL;
+				// Lex appropriate statement.
+				if (i == KEYWORD_DO) {
+					return NULL;
+				} else if (i == KEYWORD_IF) {
+					return NULL;
+				} else if (i == KEYWORD_END) {
+					return NULL;
+				} else if (i == KEYWORD_CALL) {
+					return NULL;
+				} else if (i == KEYWORD_GOTO) {
+					return stateGoto;
+				}
+				// Unreachable
+				assert(false);
 			}
 		}
 		// Lexed up to non-digit.

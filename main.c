@@ -295,10 +295,16 @@ void *stateGoto(Lexer *l) {
 		} else if (c == '(') {
 			// Beginning of Computed (Section 7.1.2.1.3)
 			return NULL;
+		} else if (c != ' ') {
+			char *str;
+			asprintf(&str, "Unexpected character '%c' in GO TO Statement", c);
+			error(l, str, "7.1.2.1");
+			free(str);
+			return NULL;
 		}
 	}
 	if (c == EOF) {
-		errorEarlyProgramTermination(l, "GOTO Statement");
+		errorEarlyProgramTermination(l, "GO TO Statement");
 		return NULL;
 	}
 	return NULL;

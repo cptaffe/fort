@@ -318,7 +318,7 @@ void *stateLine(Lexer *l);
  *
  * Maximum of MAX_SYMBOLIC_NAME_LENGTH characters long.
  */
-void *stateIdent(Lexer *l) {
+void *stateIdentOrKeyword(Lexer *l) {
 	// One character already lexed.
 	int c, seen = 0;
 	char ident[7] = {};
@@ -385,7 +385,7 @@ void *stateLine(Lexer *l) {
 		&& l->col < MAX_LINE_LENGTH) {
 		// Lex line and stuff
 		if (charLetter(c)) {
-			return stateIdent;
+			return stateIdentOrKeyword;
 		} else {
 			error(l, "Unknown Character in Line", "3.1");
 			return NULL;

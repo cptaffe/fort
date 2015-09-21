@@ -161,6 +161,7 @@ typedef struct {
 	char *buf;
 	int i, sz;
 	int col, line;
+	void *func;
 
 	struct LexicalToken *toks;
 	int toki, ntoks;
@@ -479,6 +480,21 @@ void *stateStart(Lexer *l) {
 	return statePrefix;
 }
 
+struct LexicalToken *lexerStateMachine(Lexer *l) {
+	while (l->func != NULL && l->toki == 0) {
+		l->func = ((void*(*)(Lexer*)) l->func)(l);
+		while (l->toki) {
+			l->toki--;
+			lexicalTokenPprint(&l->toks[l->toki]);
+		}
+	}
+	if (l->toki > 0) {
+		l->toki--;
+		return &l->toks[l->toki];
+	}
+	return NULL;
+}
+
 int main() {
 	HashTable h;
 	Lexer l;
@@ -489,16 +505,15 @@ int main() {
 		.nbuckets = hashTableSize
 	};
 	l = (Lexer) {
-		.input = stdin
+		.input = stdin,
+		.func = stateStart
 	};
 
-	while (func != NULL) {
-		func = ((void*(*)(Lexer*)) func)(&l);
-		while (l.toki) {
-			l.toki--;
-			lexicalTokenPprint(&l.toks[l.toki]);
-		}
+	struct LexicalToken *t;
+	while ((t = lexerStateMachine(&l))) {
+		lexicalTokenPprint(t);
 	}
+
 	free(l.buf);
 	free(h.buckets);
 }

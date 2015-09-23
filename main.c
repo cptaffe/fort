@@ -9,8 +9,10 @@
  *
  */
 
+#define _GNU_SOURCE // asprintf is useful
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
 #include <assert.h>

@@ -42,6 +42,23 @@ bool charSpecial(char c) {
 	return charIn(c, CHAR_SPECIAL);
 }
 
+struct LexicalToken {
+	int type;
+	char *str;
+	int col, line;
+};
+
+typedef struct {
+	Repl *repl;
+	char *buf;
+	int i, sz;
+	int col, line;
+	void *func;
+
+	struct LexicalToken *toks;
+	int toki, ntoks;
+} Lexer;
+
 enum {
 	// Keywords
 	_KEYWORD_BEGIN,
@@ -116,6 +133,20 @@ char *keywords[] = {
 	[KEYWORD_OP_NOT] = ".NOT."
 };
 
+void *stateEnd(Lexer *l);
+void *stateGoto(Lexer *l);
+
+// Keyword transitions
+void *transitions[] = {
+	[KEYWORD_END] = NULL,
+	[KEYWORD_GOTO] = stateGoto,
+	[KEYWORD_IF] = NULL,
+	[KEYWORD_CALL] = NULL,
+	[KEYWORD_RETURN] = NULL,
+	[KEYWORD_CONTINUE] = NULL,
+	[KEYWORD_DO] = NULL,
+};
+
 enum {
 	MAX_LINE_LENGTH = 72,
 	MAX_SYMBOLIC_NAME_LENGTH = 6,
@@ -129,24 +160,8 @@ enum {
 	LEXICAL_TOKEN_LABEL,
 	LEXICAL_TOKEN_IDENT,
 	LEXICAL_TOKEN_KEYWORD,
+	LEXICAL_TOKEN_NEWLINE,
 };
-
-struct LexicalToken {
-	int type;
-	char *str;
-	int col, line;
-};
-
-typedef struct {
-	Repl *repl;
-	char *buf;
-	int i, sz;
-	int col, line;
-	void *func;
-
-	struct LexicalToken *toks;
-	int toki, ntoks;
-} Lexer;
 
 int lexerNext(Lexer *l) {
 	if (l->i == l->sz) {
@@ -167,6 +182,16 @@ int lexerPeek(Lexer *l) {
 	int c = nextRepl(l->repl, false);
 	backRepl(l->repl, c);
 	return c;
+}
+
+int lexerIgnore(Lexer *l) {
+	int c = lexerNext(l);
+	l->i = 0;
+	return c;
+}
+
+void lexerDump(Lexer *l) {
+	l->i = 0;
 }
 
 struct LexicalToken *lexerEmit(Lexer *l, int type) {
@@ -239,12 +264,18 @@ void *stateStart(Lexer *l);
 void *stateCommentLine(Lexer *l) {
 	int c;
 	/*
-	 * Read through the rest of the line;
-	 * comment terminates on \n.
-	 * Watch for early program terminations (EOF).
-	 * Error on maximum line length exceedance.
+	 * Comments contain any character and terminate on a newline.
+	 *
+	 * Scan entire line.
+	 *
+	 * Newline [\n] (Comment) -> Start
+	 *
+	 * Early program terminations (EOF).
+	 * Maximum line length exceeded.
 	 */
-	while((c = lexerNext(l)) != EOF && c != '\n' && l->col < MAX_LINE_LENGTH) {}
+	while((c = lexerPeek(l)) != EOF && c != '\n' && l->col < MAX_LINE_LENGTH) {
+		lexerNext(l);
+	}
 	if (l->col == MAX_LINE_LENGTH) {
 		// Error: Exceeds maximum line length
 		errorMaxLineLengthExceeded(l, "comment line");
@@ -253,11 +284,14 @@ void *stateCommentLine(Lexer *l) {
 		// Error: Early program termination
 		errorEarlyProgramTermination(l, "comment line");
 		return NULL;
-	} else {
+	} else if (c == '\n') {
 		// Emit comment line.
 		lexerEmit(l, LEXICAL_TOKEN_COMMENT);
+		lexerNext(l); // Consume newline
+		lexerEmit(l, LEXICAL_TOKEN_NEWLINE);
 		return stateStart;
 	}
+	assert(false); // Should never reach
 }
 
 void *stateAssignedGoto(Lexer *l) {
@@ -266,11 +300,23 @@ void *stateAssignedGoto(Lexer *l) {
 
 void *stateUnconditionalOrAssignedGoto(Lexer *l) {
 	int c;
+	/*
+	 * Unconditional and Assiged GO TOs begin with a Statement Label.
+	 *
+	 * Scan up to a non-Label, scan trhough newline.
+	 *
+	 * Newline [\n] (Unconditional GO TO) -> Start
+	 * Comma [,] -> Assigned GO TO
+	 *
+	 * Unexpected character (not digit, newline, comma, space)
+	 * Early program termination (EOF)
+	 * Maximum line length exceeded.
+	 */
 	while ((c = lexerPeek(l)) != EOF
 		&& c != '\n'
 		&& l->col < MAX_LINE_LENGTH) {
 		if (charDigit(c)) {
-			// Good to go
+			// Scan Label
 		} else if (c == ',') {
 			// Assigned GO TO
 			// Emit Label
@@ -293,17 +339,31 @@ void *stateUnconditionalOrAssignedGoto(Lexer *l) {
 	} else if (c == '\n') {
 		// Saw label and newline.
 		lexerEmit(l, LEXICAL_TOKEN_LABEL);
+		lexerNext(l); // Consume newline
+		lexerEmit(l, LEXICAL_TOKEN_NEWLINE);
 		return stateStart;
 	}
 	assert(0); // Should never reach
 }
 
 /*
- * GOTO statement (Section 7.1.2.1)
+ * GO TO statement (Section 7.1.2.1)
  * Unconditional, Assigned, and Computed.
  */
 void *stateGoto(Lexer *l) {
 	int c;
+	/*
+	 * GO TO Statment (Unconditional, Assigned, Computed)
+	 *
+	 * Scan through digit or beginning parenthesis.
+	 *
+	 * Digit -> Unconditional or Assigned GO TO
+	 * Open Paren [(] -> Computed GO TO
+	 *
+	 * Early Program Termination
+	 * Unexpected newline
+	 * Unexpected character (not digit, open paren, or space)
+	 */
 	while ((c = lexerNext(l)) != EOF
 		&& c != '\n'
 		&& l->col < MAX_LINE_LENGTH) {
@@ -326,8 +386,37 @@ void *stateGoto(Lexer *l) {
 	if (c == EOF) {
 		errorEarlyProgramTermination(l, "GO TO Statement");
 		return NULL;
+	} else if (c == '\n') {
+		error(l, "Unexpected newline, expected Label in GO TO Statement", "1.7.2.1");
 	}
 	return NULL;
+}
+
+void *stateEnd(Lexer *l) {
+	int c;
+	bool extensionAllowNewlines = true;
+	/*
+	 * End Line
+	 *
+	 * Scan through to EOF.
+	 *
+	 * EXTENSION: Allow newlines
+	 *
+	 * EOF -> End
+	 *
+	 * Unxepected character (not EOF, space, or newline (with extension))
+	 * Maximum line length exceeded
+	 */
+	while ((c = lexerNext(l)) != EOF
+		&& (extensionAllowNewlines && c != '\n')
+		&& l->col < MAX_LINE_LENGTH) {
+		if (c != ' ') {
+			char *str;
+			asprintf(&str, "Unexpected character '%c' in End Line", c);
+			error(l, str, "TODO");
+			free(str);
+		}
+	}
 }
 
 void *stateLine(Lexer *l);
@@ -369,19 +458,7 @@ void *stateIdentOrKeyword(Lexer *l) {
 			if (strcmp(ident, keywords[i]) == 0) {
 				lexerEmit(l, LEXICAL_TOKEN_KEYWORD);
 				// Lex appropriate statement.
-				if (i == KEYWORD_DO) {
-					return NULL;
-				} else if (i == KEYWORD_IF) {
-					return NULL;
-				} else if (i == KEYWORD_END) {
-					return NULL;
-				} else if (i == KEYWORD_CALL) {
-					return NULL;
-				} else if (i == KEYWORD_GOTO) {
-					return stateGoto;
-				}
-				// Unreachable
-				assert(false);
+				return transitions[i];
 			}
 		}
 		// Lexed up to non-digit.
@@ -491,6 +568,7 @@ void *statePrefix(Lexer *l) {
 		}
 	} else {
 		// Initial or End line.
+		lexerDump(l); // dump blank prefix
 		return stateLine;
 	}
 }

@@ -20,9 +20,11 @@
 #include "hash.c"
 #include "repl.c"
 #include "lex.c"
+#include "parse.c"
 
 int main() {
 	HashTable h;
+	Parser p;
 	Lexer l;
 	Repl r;
 	void *func = stateStart;
@@ -40,11 +42,11 @@ int main() {
 		.repl = &r,
 		.func = stateStart
 	};
+	p = (Parser){
+		.l = &l,
+	};
 
-	struct LexicalToken *t;
-	while ((t = lexerStateMachine(&l))) {
-		lexicalTokenPprint(t);
-	}
+	parserParse(&p);
 
 	free(l.buf);
 	free(h.buckets);

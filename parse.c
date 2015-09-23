@@ -6,22 +6,49 @@ typedef struct Tree {
 } Tree;
 
 enum {
+	TREE_TYPE_NONE,
 	TREE_TYPE_GOTO,
 };
+
+typedef Tree *(AppendFunc)(Tree *, Tree *);
+
+// Forward declare functions
+AppendFunc appendNode, appendGotoNode;
+
+// Specific appends for node types.
+AppendFunc *appends[] = {
+	[TREE_TYPE_NONE] = appendNode,
+	[TREE_TYPE_GOTO] = appendGotoNode
+};
+
+// Default append function
+// Returns null on failure, c on empty slot fill.
+Tree *appendNode(Tree *t, Tree *c) {
+	if (t->left == NULL || t->right == NULL) {
+		if (t->left == NULL) {
+			t->left = c;
+		} else {
+			t->right = c;
+		}
+		return c;
+	}
+	return NULL;
+}
 
 Tree *appendGotoNode(Tree *t, Tree *c) {
 	printf("woot");
 	return NULL;
 }
 
-// Specific appends for node types.
-Tree *(*appends[])(Tree *, Tree *) = {
-	[TREE_TYPE_GOTO] = appendGotoNode
-};
-
 Tree *appendTree(Tree *t, Tree *c) {
 	assert(t != NULL && c != NULL);
-	return appends[t->type](t, c);
+	AppendFunc *a = appends[t->type];
+	if (a != NULL) {
+		return appends[t->type](t, c);
+	} else {
+		// Default append function
+		return NULL;
+	}
 }
 
 typedef struct {
